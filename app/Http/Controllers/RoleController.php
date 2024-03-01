@@ -2,35 +2,37 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\PermissionRequest;
+use App\Http\Requests\RoleRequest;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
-class PermissionController extends Controller
+class RoleController extends Controller
 {
     /**
      * Display a listing of the resource.
      *
      * @return \Illuminate\Http\Response
      */
-    public function index(Request $req)
+    public function index(Request $request)
     {   
-        $query = Permission::query();
+        $query = Role::query();
 
-        if ($req['where']) {
-            foreach ($req['where'] as $filter) {
+        $query->where('name', '!=', 'master');
+
+        if ($request['where']) {
+            foreach ($request['where'] as $filter) {
                 $where = json_decode($filter);
                 if (isset($where->whereType) && $where->whereType == "or") {
-                    $query->orWhere($where->field, $where->operator, $where->value);
+                    $query->orWhere($where->field, isset($where->operator) ? $where->operator : '=', $where->value);
                 } else {
                     $query->where($where->field, isset($where->operator) ? $where->operator : '=', $where->value);
                 }
             }
         }
 
-        if ($req['orderby']) {
-            foreach ($req['orderby'] as $orderby) {
+        if ($request['orderby']) {
+            foreach ($request['orderby'] as $orderby) {
                 $order = json_decode($orderby);
                 $query->orderBy($order->field, $order->type);
             }
@@ -39,7 +41,7 @@ class PermissionController extends Controller
         }
 
         $count = $query->count();
-        $list = $query->offset($req['offset'])->limit($req['limit'])->get();
+        $list = $query->offset($request['offset'])->limit($request['limit'])->get();
 
         return response()->json([
             'itens' => $list,
@@ -53,12 +55,18 @@ class PermissionController extends Controller
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\Response
      */
-    public function store(PermissionRequest $req)
+    public function store(RoleRequest $request)
     {
-        Permission::create($req->validated());
+        $model = Role::create($request->validated());
+
+        if (isset($request->permissions)) {
+            $permissions = Permission::whereIn('id', array_column($request->permissions, 'id'))->get();
+
+            $model->syncPermissions($permissions);
+        }
 
         return response()->json(
-            'Permissão cadastrada com sucesso!!',
+            'Grupo cadastrado com sucesso!!',
         );
     }
 
@@ -70,7 +78,7 @@ class PermissionController extends Controller
      */
     public function show($id)
     {
-        $model = Permission::findOrFail($id);
+        $model = Role::with('permissions')->findOrFail($id);
 
         return response()->json($model);
     }
@@ -82,18 +90,25 @@ class PermissionController extends Controller
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
-    public function update(PermissionRequest $request, $id)
+    public function update(RoleRequest $request, $id)
     {
-        $validated = $request->validated();
+        $model = Role::findOrFail($id);
 
-        $model = Permission::findOrFail($id);
-
-        $model->fill($validated);
+        $model->fill($request->validated());
 
         if ($model->save()) {
-            return response()->json('Permissão atualizada com sucesso!!');
-        } else {
-            return response()->json('Erro ao atualizar a permissão!!');
+            $permissions = [];
+
+            if (isset($request->permissions)) {
+                $permissions = Permission::whereIn('id', array_column($request->permissions, 'id'))->get();
+            }
+
+            $model->syncPermissions($permissions);
+
+            return response()->json([
+                'message' => 'Grupo atualizado com sucesso!!',
+                'permissions' => $request->permissions
+            ]);
         }
     }
 
@@ -105,22 +120,12 @@ class PermissionController extends Controller
      */
     public function destroy($id)
     {
-        $model = Permission::findOrFail($id);
+        $model = Role::findOrFail($id);
 
         if ($model->delete()) {
-            return response()->json('Permissão excluida com sucesso!!');
+            return response()->json('Grupo excluido com sucesso!!');
         } else {
-            return response()->json('Erro ao excluir permissão!!');
-        }
-    }
-
-    public function checkPermission(Request $request)
-    {
-        if (Auth::user()->hasRole('super') || 
-            Auth::user()->can($request->permission)) {
-            return response()->json(['message' => 'Autorizado'], 200);
-        } else {
-            return response()->json(['message' => 'Não autorizado'], 403);
+            return response()->json('Erro ao excluir grupo!!');
         }
     }
 }
